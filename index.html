@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="style.css">
+
+    <title>Statki</title>
+</head>
+
+<body>
+
+    <h1>Gra w statki</h1>
+
+    <div id="game-message">
+        Wybierz pole przeciwnika
+    </div>
+
+    <div id="input-container">
+        <input
+            id="shot-input"
+            type="text"
+            maxlength="3"
+            placeholder="np. A1"
+            autocomplete="off"
+        >
+
+        <button id="shoot-button">
+            Strzał
+        </button>
+    </div>
+
+    <div id="container">
+
+        <div class="board-container">
+            <div class="board-title">
+                Moja flota
+            </div>
+
+            <div class="left-board"></div>
+        </div>
+
+        <div class="board-container">
+            <div class="board-title">
+                Przeciwnik
+            </div>
+
+            <div class="right-board"></div>
+        </div>
+
+    </div>
+
+    <script src="main.js"></script>
+
+</body>
+</html>

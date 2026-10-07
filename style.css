@@ -1,0 +1,138 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background-color: #f2f2f2;
+}
+
+h1 {
+    margin-bottom: 10px;
+}
+
+#game-message {
+    min-height: 30px;
+    margin-bottom: 15px;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+#input-container {
+    margin-bottom: 25px;
+}
+
+#shot-input {
+    width: 100px;
+    padding: 8px;
+    font-size: 16px;
+    text-transform: uppercase;
+}
+
+#shoot-button {
+    padding: 9px 15px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+#container {
+    display: flex;
+    justify-content: center;
+    gap: 50px;
+}
+
+.board-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.board-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.board {
+    display: flex;
+    flex-direction: column;
+}
+
+.board-row {
+    display: flex;
+}
+
+.board-tile {
+    width: 35px;
+    height: 35px;
+
+    border: 1px solid #333;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background-color: #8ecae6;
+
+    font-weight: bold;
+
+    cursor: pointer;
+
+    user-select: none;
+}
+
+/* Nagłówki planszy */
+
+.board-tile.header {
+    background-color: #ddd;
+    cursor: default;
+}
+
+.board-tile.corner {
+    background-color: transparent;
+    border: none;
+}
+
+/* Statek gracza */
+
+.board-tile.ship {
+    background-color: #555;
+}
+
+/* Pudło */
+
+.board-tile.miss {
+    background-color: #eee;
+}
+
+.board-tile.miss::after {
+    content: "•";
+    color: #333;
+    font-size: 25px;
+}
+
+/* Trafienie */
+
+.board-tile.hit {
+    background-color: #e63946;
+    color: white;
+}
+
+.board-tile.hit::after {
+    content: "✕";
+    font-size: 22px;
+}
+
+/* Kliknięcie planszy przeciwnika */
+
+.right-board .board-tile:not(.header):not(.corner):not(.hit):not(.miss):hover {
+    background-color: #219ebc;
+}
+
+/* Koniec gry */
+
+.game-over {
+    color: #d00000;
+    font-size: 22px;
+}
