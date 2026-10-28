@@ -1,0 +1,93 @@
+Aplikacja po poprawkach jest zgodna z dokumentacją wymagań; wszystkie 30 testów przechodzi, a przepływ użytkownika na żywym serwerze zweryfikowałem w 15 punktach. Znalazłem jednak kilka realnych błędów, w tym jeden poważny w bezpieczeństwie, które naprawiłem.
+
+Co sprawdziłem
+Porównałem kod z załączoną dokumentacją (logowanie kodem jednorazowym, limity, 9 formatów / 18 ścieżek, profile konwersji, statusy, ponawianie, usuwanie po 60 minutach, dziennik administratora, piaskownica). Funkcjonalnie niczego z wymagań nie brakuje — wszystkie punkty są zaimplementowane. Problemy dotyczyły poprawności działania, nie zakresu.
+
+Znalezione i naprawione błędy
+Limit 5 prób kodu nie działał (krytyczne). W verify_login_code wyjątek HTTPException był rzucany wewnątrz transaction(), co wycofywało zapis licznika prób. Kod można było zgadywać bez ograniczeń. Teraz licznik jest zapisywany przed zgłoszeniem błędu, a kod jest zużywany atomowo (dwa równoległe żądania nie utworzą dwóch sesji).
+Docker nie uruchomiłby się — config.py importuje python-dotenv, którego nie było w requirements.txt.
+GIF → MP4/MOV kończyłoby się błędem lub nieodtwarzalnym plikiem — libx264 wymaga parzystych wymiarów i yuv420p; dodałem skalowanie, format pikseli i +faststart.
+Limit 10 użytkowników sprawdzany tylko przy logowaniu — osoba z zapamiętaną sesją omijała go. Teraz powracająca po 15 minutach sesja też podlega limitowi i dostaje komunikat o zajętym serwerze (frontend go wyświetla).
+Brak limitu zamawiania kodów — dodałem maks. 5 kodów na adres w 15 minut (429), konfigurowalne w .env.
+WAV zawsze 16-bit mimo wymogu „parametry źródła” — ffprobe (był w konfiguracji, ale nieużywany) odczytuje głębię i dobiera pcm_s16le/s24le/s32le.
+Zadania asyncio.create_task nie miały przechowywanej referencji (ryzyko przerwania konwersji przez GC); błędy walidacji FastAPI zwracały angielski komunikat — oba poprawione.
+Testy
+tests/test_rules.py rozszerzony o profile FFmpeg i rozróżnienie JPEG/MP3.
+Nowy tests/test_api.py (22 testy na tymczasowej bazie): pełne logowanie, jednorazowość i wygaśnięcie kodu, limit prób i limit zamawiania, ciasteczko HttpOnly/SameSite, wylogowanie, limit użytkowników, rzeczywiste konwersje PNG→JPG (białe tło), JPG→PNG, PNG→HEIC, niezależny błąd jednego pliku + ponowienie, odrzucenie trzeciego pliku / złej kategorii / podrobionego rozszerzenia / za dużego pliku, izolacja plików między użytkownikami, dziennik administratora, czyszczenie po terminie.
+Dodany requirements-dev.txt (httpx dla klienta testowego); README i .env.example zaktualizowane.
+Czego nie mogłem zweryfikować
+W sesji nie ma narzędzi przeglądarkowych, więc UI sprawdziłem pośrednio: składnia app.js (Node), ładowanie strony i te same wywołania API, które wykonuje frontend. Sam klik/drag-and-drop w przeglądarce warto obejrzeć ręcznie.
+Na tym komputerze nie ma FFmpeg, więc konwersje audio/wideo potwierdziłem tylko na poziomie budowanych poleceń i ścieżki błędu (status „błąd”, możliwość ponowienia). Pełny test audio/wideo wymaga uruchomienia w Dockerze.
+
+Oba punkty da się sprawdzić bez zmieniania kodu aplikacji. Interfejs można przetestować ręcznie w przeglądarce, a docelowo automatycznie Playwrightem. Konwersje audio i wideo wymagają FFmpeg: zainstalowanego lokalnie albo w obrazie Docker, który już go zawiera.
+
+1. Interfejs w przeglądarce (klikanie, drag and drop)
+Ręcznie, około 10 minut. Uruchom serwer w trybie development:
+
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+Otwórz http://localhost:8000. Bez skonfigurowanego SMTP kod logowania pojawi się w formularzu. Sprawdź po kolei:
+
+Logowanie: wpisz e-mail, potem kod. Błędny kod powinien pokazać „Pozostało prób: 4”. Po odświeżeniu strony (F5) sesja ma zostać zapamiętana.
+Przycisk „Wybierz pliki”: wybierz jeden lub dwa pliki. Przy wyborze trzeciego powinien pojawić się komunikat „najwyżej dwa pliki”.
+Drag and drop: przeciągnij plik z Eksploratora na pole. Pole powinno się podświetlić, a plik pojawić na liście.
+Lista formatów docelowych: dla każdego pliku tylko dwa formaty z tej samej kategorii. Ostrzeżenie o stracie jakości ma się zmieniać po zmianie formatu.
+Plik .txt przemianowany na .png: serwer powinien go odrzucić, bo format rozpoznaje po zawartości.
+Konwersja: status ma przejść z „oczekuje” przez „w toku” do „gotowe” bez ręcznego odświeżania. Potem sprawdź link „Pobierz”, przycisk „Ponów” przy błędzie i datę usunięcia.
+Wylogowanie i powrót do ekranu logowania.
+Konto administratora: dodaj swój adres do ADMIN_EMAILS w .env, zaloguj się i otwórz dziennik.
+Na koniec przejrzyj w konsoli DevTools (F12), czy nie ma błędów JavaScript.
+Automatycznie przez Playwright, czyli narzędzie wskazane w dokumentacji:
+
+pip install playwright
+playwright install chromium
+Test logowałby się kodem z odpowiedzi /api/auth/request-code i dodawał pliki przez page.set_input_files("#file-input", ...). Drag and drop można zasymulować, tworząc w page.evaluate obiekt DataTransfer i wysyłając zdarzenie drop na #drop-zone. Taki test zostaje w projekcie i można go uruchamiać w CI.
+
+2. Konwersje audio i wideo (FFmpeg)
+Najpierw trzeba mieć FFmpeg. Są dwie drogi:
+
+Lokalnie: winget install Gyan.FFmpeg, potem otwórz nowy terminal i sprawdź ffmpeg -version oraz ffprobe -version.
+W Dockerze: skopiuj .env.example do .env i uruchom docker compose up --build. To jest środowisko docelowe, więc działają też limity pamięci i CPU piaskownicy. Na Windowsie te limity w ogóle nie są stosowane, bo kod ustawia je tylko w systemach typu Linux.
+Pliki wzorcowe można wygenerować samym FFmpeg, bez szukania próbek:
+
+ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -ar 48000 -c:a pcm_s24le probka24.wav
+ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -c:a flac probka.flac
+ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -c:a libmp3lame -b:a 192k probka.mp3
+ffmpeg -f lavfi -i "testsrc=size=320x240:rate=25:duration=3" -f lavfi -i "sine=duration=3" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest probka.mp4
+ffmpeg -f lavfi -i "testsrc=size=321x241:rate=10:duration=3" probka.gif
+ffmpeg -i probka.mp4 -c:v prores_ks -c:a pcm_s16le probka_prores.mov
+Niektóre próbki sprawdzają konkretne poprawki:
+
+probka.gif ma celowo nieparzyste wymiary, żeby przetestować poprawkę GIF → MP4.
+probka24.wav ma 24 bity, żeby sprawdzić, czy wynik WAV zachowuje głębię źródła.
+probka_prores.mov ma kodeki niepasujące do MP4, więc wymusza ponowne kodowanie zamiast przepakowania.
+Wgraj próbki przez interfejs, pobierz wyniki i sprawdź je:
+
+ffprobe -v error -show_entries stream=codec_name,bit_rate,sample_rate,bits_per_sample,width,height,pix_fmt -of compact wynik.mp4
+Wyniki porównaj z profilami z dokumentacji (pkt 3.1):
+
+Ścieżka	Czego oczekiwać w ffprobe
+→ MP3
+mp3, bitrate 320000
+→ FLAC
+flac, częstotliwość i głębia bitowa jak w źródle
+WAV 24-bit → FLAC → WAV
+pcm_s24le
+→ MP4
+h264 + aac (~256 kb/s), yuv420p, parzyste wymiary
+MP4 → MOV
+te same kodeki co w źródle (przepakowanie, bardzo szybkie)
+ProRes MOV → MP4
+h264 + aac
+→ GIF
+brak strumienia audio
+Wynik warto też po prostu odtworzyć, na przykład w VLC lub w przeglądarce.
+
+Ścieżki HEIC → JPG i HEIC → PNG potrzebują prawdziwego pliku HEIC, na przykład zdjęcia z iPhone'a. Dobrze, żeby był obrócony, bo wtedy sprawdzisz też zachowanie EXIF i orientacji. Plik testowy można też stworzyć przez pillow-heif, które już jest w .venv.
+
+3. Czego dodatkowo nie sprawdziłem
+Dokumentacja (pkt 9) jako kryterium zaliczenia podaje test z 10 jednoczesnymi sesjami bez błędów serwera. Takiego testu nie uruchamiałem. Można to zrobić Locustem (pip install locust): 10 wirtualnych użytkowników loguje się, wysyła pliki i odpytuje status, a wynik ma nie zawierać żadnych błędów 5xx.
+
+W Dockerze warto również wysłać plik bliski 250 MB, bo limit pamięci konwertera (CONVERTER_MEMORY_MB=512) może okazać się za mały dla FFmpeg przy dużym wideo.
+
+Mogę przygotować test Playwright, skrypt z próbkami i sprawdzeniem przez ffprobe albo scenariusz Locusta. Powiedz tylko, które z nich.
