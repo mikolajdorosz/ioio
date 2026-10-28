@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>Konwerter plików multimedialnych</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Strona główna">
+          <span class="brand-mark" aria-hidden="true">↻</span>
+          <span>Konwerter</span>
+        </a>
+        <div id="account" class="account hidden">
+          <span id="user-email"></span>
+          <button id="admin-button" class="text-button hidden" type="button">Dziennik administratora</button>
+          <button id="logout-button" class="text-button" type="button">Wyloguj</button>
+        </div>
+      </header>
+
+      <section id="notice" class="notice hidden" role="status" aria-live="polite"></section>
+
+      <section id="login-view" class="login-layout">
+        <div class="intro">
+          <p class="eyebrow">BEZPIECZNA KONWERSJA PLIKÓW</p>
+          <h1>Jeden prosty krok od pliku do właściwego formatu.</h1>
+          <p class="lead">Zamieniaj pliki audio, obrazy i wideo. Wybierz do dwóch plików, wskaż format docelowy i pobierz wynik.</p>
+          <ul class="feature-list">
+            <li>Do 250 MB na plik</li>
+            <li>Wyniki dostępne przez 60 minut</li>
+            <li>Format sprawdzany po zawartości pliku</li>
+          </ul>
+        </div>
+        <form id="email-form" class="card auth-card">
+          <h2>Zaloguj się</h2>
+          <p>Wyślemy jednorazowy kod na Twój adres e-mail.</p>
+          <label for="email">Adres e-mail</label>
+          <input id="email" name="email" autocomplete="email" inputmode="email" type="email" placeholder="twoj@email.pl" required />
+          <button class="primary" type="submit">Wyślij kod</button>
+        </form>
+        <form id="code-form" class="card auth-card hidden">
+          <h2>Wpisz kod</h2>
+          <p>Kod jest ważny przez 10 minut. Możesz użyć go tylko raz.</p>
+          <label for="otp-code">Kod jednorazowy</label>
+          <input id="otp-code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required />
+          <p id="development-code" class="development-code hidden"></p>
+          <button class="primary" type="submit">Zaloguj</button>
+          <button id="back-to-email" class="text-button center" type="button">Użyj innego adresu</button>
+        </form>
+      </section>
+
+      <section id="app-view" class="app-view hidden">
+        <div class="app-heading">
+          <div>
+            <p class="eyebrow">NOWE ZADANIE</p>
+            <h1>Dodaj pliki do konwersji</h1>
+          </div>
+          <p class="constraint">Maksymalnie 2 pliki • 250 MB na plik</p>
+        </div>
+
+        <section id="drop-zone" class="drop-zone" tabindex="0" aria-label="Upuść pliki tutaj lub wybierz je z dysku">
+          <input id="file-input" type="file" multiple hidden accept=".flac,.mp3,.wav,.jpg,.jpeg,.png,.heic,.gif,.mp4,.mov" />
+          <div class="drop-icon" aria-hidden="true">⇧</div>
+          <h2>Upuść pliki tutaj</h2>
+          <p>Obsługiwane są pliki FLAC, MP3, WAV, JPG, PNG, HEIC, GIF, MP4 i MOV.</p>
+          <button id="choose-files" class="secondary" type="button">Wybierz pliki</button>
+        </section>
+        <p class="helper">Format pliku jest ostatecznie rozpoznawany po jego sygnaturze po przesłaniu na serwer.</p>
+
+        <section id="selected-panel" class="card selected-panel hidden" aria-labelledby="selected-title">
+          <div class="section-title-row">
+            <h2 id="selected-title">Wybrane pliki</h2>
+            <button id="clear-files" class="text-button" type="button">Usuń wszystkie</button>
+          </div>
+          <div id="selected-files" class="selected-files"></div>
+          <div id="warnings" class="warnings"></div>
+          <button id="convert-button" class="primary convert" type="button">Konwertuj pliki</button>
+        </section>
+
+        <section class="tasks-section" aria-labelledby="tasks-title">
+          <div class="section-title-row">
+            <div>
+              <p class="eyebrow">HISTORIA</p>
+              <h2 id="tasks-title">Twoje zadania</h2>
+            </div>
+            <button id="refresh-tasks" class="secondary compact" type="button">Odśwież</button>
+          </div>
+          <div id="tasks" class="tasks"><p class="empty">Nie masz jeszcze żadnych zadań.</p></div>
+        </section>
+      </section>
+
+      <dialog id="logs-dialog" class="logs-dialog">
+        <form method="dialog"><button class="close-button" aria-label="Zamknij">×</button></form>
+        <h2>Dziennik aplikacji</h2>
+        <pre id="logs-content"></pre>
+      </dialog>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
