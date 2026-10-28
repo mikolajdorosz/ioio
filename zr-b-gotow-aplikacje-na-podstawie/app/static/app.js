@@ -280,7 +280,11 @@ function bindEvents() {
 
 async function bootstrap() {
   bindEvents();
-  try { const payload = await api("/api/me"); state.user = payload.user; enterApp(); } catch (_) { /* login is the expected initial state */ }
+  try { const payload = await api("/api/me"); state.user = payload.user; enterApp(); }
+  catch (error) {
+    // Brak sesji to normalny stan początkowy; komunikat o zajętym serwerze musi być jednak widoczny.
+    if (/zajęty/.test(error.message)) showNotice(error.message, "error");
+  }
 }
 
 bootstrap();

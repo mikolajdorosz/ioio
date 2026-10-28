@@ -22,6 +22,10 @@ COOKIE_NAME = "konwerter_session"
 _queue_limit = asyncio.Semaphore(settings.max_conversions)
 _queued_file_ids: set[str] = set()
 _queue_guard = asyncio.Lock()
+# asyncio keeps only weak references to running tasks, so a strong reference is held
+# here until each conversion finishes.
+_background_tasks: set[asyncio.Task] = set()
+BUSY_MESSAGE = "Serwer jest obecnie zajęty. Spróbuj ponownie za kilka minut."
 
 
 def _as_dict(row) -> dict:
@@ -60,6 +64,13 @@ async def request_login_code(email: str) -> dict:
     value = otp()
     timestamp = now()
     with transaction() as conn:
+        recent = conn.execute(
+            "SELECT COUNT(*) FROM one_time_codes WHERE email = ? AND created_at > ?",
+            (email, iso_after_minutes(-settings.otp_request_window_minutes)),
+        ).fetchone()[0]
+        if recent >= settings.otp_requests_per_window:
+            logger.warning("Przekroczono limit próśb o kod dla %s", email)
+            raise HTTPException(status_code=429, detail="Zbyt wiele próśb o kod dla tego adresu. Spróbuj ponownie za kilka minut.")
         conn.execute("UPDATE one_time_codes SET used = 1 WHERE email = ? AND used = 0", (email,))
         conn.execute(
             "INSERT INTO one_time_codes (id, user_id, email, code_hash, expires_at, attempts, used, created_at) VALUES (?, NULL, ?, ?, ?, 0, 0, ?)",
@@ -87,40 +98,65 @@ def _active_user_count(conn) -> int:
     )
 
 
+def _user_is_active(conn, user_id: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? AND last_active_at > ? LIMIT 1",
+            (user_id, now(), iso_after_minutes(-settings.active_window_minutes)),
+        ).fetchone()
+        is not None
+    )
+
+
+def _ensure_capacity(conn, user_id: str) -> None:
+    """Użytkownik, który nie był aktywny w oknie 15 minut, zajmuje nowe miejsce w limicie."""
+    if _user_is_active(conn, user_id):
+        return
+    if _active_user_count(conn) >= settings.max_active_users:
+        raise HTTPException(status_code=503, detail=BUSY_MESSAGE)
+
+
 def verify_login_code(email: str, code: str) -> tuple[str, dict]:
     email = email.strip().lower()
     if not _email_ok(email) or not code.isdigit() or len(code) != 6:
         raise HTTPException(status_code=422, detail="Podaj e-mail i sześciocyfrowy kod.")
+    # Raising inside ``transaction()`` would roll back the attempt counter, which would
+    # make the five-attempt limit ineffective. The failure is therefore recorded first,
+    # committed, and only then reported to the client.
+    failure: HTTPException | None = None
     with transaction() as conn:
         record = conn.execute(
             "SELECT * FROM one_time_codes WHERE email = ? ORDER BY created_at DESC LIMIT 1", (email,)
         ).fetchone()
         if record is None or record["used"] or parse_time(record["expires_at"]) <= datetime.now(UTC):
-            raise HTTPException(status_code=401, detail="Kod jest nieważny lub wygasł. Zamów nowy kod.")
-        if record["attempts"] >= settings.otp_max_attempts:
+            failure = HTTPException(status_code=401, detail="Kod jest nieważny lub wygasł. Zamów nowy kod.")
+        elif record["attempts"] >= settings.otp_max_attempts:
             conn.execute("UPDATE one_time_codes SET used = 1 WHERE id = ?", (record["id"],))
-            raise HTTPException(status_code=401, detail="Wykorzystano limit prób. Zamów nowy kod.")
-        if not constant_time_equal(record["code_hash"], digest(code)):
+            failure = HTTPException(status_code=401, detail="Wykorzystano limit prób. Zamów nowy kod.")
+        elif not constant_time_equal(record["code_hash"], digest(code)):
             attempts = record["attempts"] + 1
             conn.execute("UPDATE one_time_codes SET attempts = ?, used = ? WHERE id = ?", (attempts, int(attempts >= settings.otp_max_attempts), record["id"]))
             left = max(0, settings.otp_max_attempts - attempts)
-            raise HTTPException(status_code=401, detail=f"Nieprawidłowy kod. Pozostało prób: {left}.")
+            logger.warning("Nieprawidłowy kod dla %s (próba %s z %s)", email, attempts, settings.otp_max_attempts)
+            failure = HTTPException(status_code=401, detail=f"Nieprawidłowy kod. Pozostało prób: {left}.")
+    if failure is not None:
+        raise failure
 
+    with transaction() as conn:
         user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if user is None:
             user_id = str(uuid.uuid4())
             conn.execute("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)", (user_id, email, now()))
             user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        if _active_user_count(conn) >= settings.max_active_users:
-            already_active = conn.execute(
-                "SELECT 1 FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? AND last_active_at > ? LIMIT 1",
-                (user["id"], now(), iso_after_minutes(-settings.active_window_minutes)),
-            ).fetchone()
-            if not already_active:
-                raise HTTPException(status_code=503, detail="Serwer jest obecnie zajęty. Spróbuj ponownie za kilka minut.")
+        _ensure_capacity(conn, user["id"])
 
         raw_token = random_token()
-        conn.execute("UPDATE one_time_codes SET used = 1, user_id = ? WHERE id = ?", (user["id"], record["id"]))
+        # The code is consumed atomically, so two parallel requests cannot both succeed.
+        consumed = conn.execute(
+            "UPDATE one_time_codes SET used = 1, user_id = ? WHERE id = ? AND used = 0", (user["id"], record["id"])
+        ).rowcount
+        if consumed != 1:
+            raise HTTPException(status_code=401, detail="Kod jest nieważny lub wygasł. Zamów nowy kod.")
         conn.execute(
             "INSERT INTO sessions (id, user_id, token_hash, expires_at, last_active_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), user["id"], digest(raw_token), iso_after_days(settings.session_days), now(), now()),
@@ -139,6 +175,9 @@ def current_user(token: str | None) -> dict:
         ).fetchone()
         if session is None or parse_time(session["expires_at"]) <= datetime.now(UTC):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesja wygasła. Zaloguj się ponownie.")
+        # A remembered session returning after a long break counts as a new concurrent
+        # user, therefore the same capacity rule applies as during login.
+        _ensure_capacity(conn, session["user_id"])
         conn.execute("UPDATE sessions SET last_active_at = ? WHERE id = ?", (now(), session["id"]))
     return {"id": session["user_id"], "email": session["email"], "is_admin": session["email"].lower() in settings.admin_emails}
 
@@ -225,7 +264,9 @@ async def enqueue(file_id: str) -> None:
         if file_id in _queued_file_ids:
             return
         _queued_file_ids.add(file_id)
-    asyncio.create_task(_process_file(file_id), name=f"conversion-{file_id}")
+    task = asyncio.create_task(_process_file(file_id), name=f"conversion-{file_id}")
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _process_file(file_id: str) -> None:

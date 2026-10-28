@@ -4,8 +4,8 @@ Gotowa aplikacja webowa do bezpiecznej konwersji plików audio, obrazów i wideo
 
 ## Zakres funkcji
 
-- Logowanie hasłem jednorazowym: sześciocyfrowy kod ważny 10 minut, maksymalnie pięć prób, sesja `HttpOnly` ważna 30 dni i unieważniana przy wylogowaniu.
-- Limit 10 aktywnych użytkowników w ciągu ostatnich 15 minut.
+- Logowanie hasłem jednorazowym: sześciocyfrowy kod ważny 10 minut, maksymalnie pięć prób, najwyżej pięć kodów na adres w ciągu 15 minut, sesja `HttpOnly` ważna 30 dni i unieważniana przy wylogowaniu.
+- Limit 10 aktywnych użytkowników w ciągu ostatnich 15 minut, egzekwowany zarówno przy logowaniu, jak i dla zapamiętanych sesji wracających po przerwie.
 - Import metodą przeciągnij i upuść albo przyciskiem, od jednego do dwóch plików na zadanie, maksymalnie 250 MB na plik.
 - Rozpoznawanie formatu na podstawie sygnatury pliku, nie samego rozszerzenia.
 - Dziewięć formatów: FLAC, MP3, WAV, JPG, PNG, HEIC, GIF, MP4 i MOV; dozwolone są wyłącznie dwa formaty docelowe z tej samej kategorii (18 ścieżek).
@@ -65,10 +65,16 @@ uvicorn app.main:app --reload
 
 ## Testy
 
-Po zainstalowaniu zależności uruchom:
+Testy API korzystają z klienta testowego FastAPI, który wymaga pakietu `httpx`:
 
 ```powershell
+pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 
-Testy pokrywają reguły formatów, ich sygnatury i mechanizmy bezpieczeństwa kodów jednorazowych.
+Zakres testów:
+
+- `tests/test_rules.py` – reguły formatów (18 ścieżek), sygnatury plików, ostrzeżenia, profile poleceń FFmpeg i hashowanie kodów.
+- `tests/test_api.py` – cały przepływ przez API na tymczasowej bazie: logowanie kodem (jednorazowość, wygaśnięcie, limit 5 prób, limit zamawiania kodów), ciasteczko sesji i wylogowanie, limit jednoczesnych użytkowników (także dla powracających sesji), tworzenie zadań z 1–2 plikami, rzeczywista konwersja obrazów (PNG → JPG z białym tłem, JPG → PNG, PNG → HEIC), niezależny status i ponowienie błędnego pliku, odrzucanie trzeciego pliku, złego formatu docelowego, nierozpoznanej zawartości i zbyt dużego pliku, izolacja plików między użytkownikami, dziennik administratora oraz czyszczenie po terminie usunięcia.
+
+Konwersje audio i wideo wymagają FFmpeg na `PATH`; bez niego plik kończy się statusem „błąd” z czytelnym komunikatem, co testy również sprawdzają.

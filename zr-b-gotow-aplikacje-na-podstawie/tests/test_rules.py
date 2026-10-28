@@ -1,7 +1,8 @@
 import unittest
+from pathlib import Path
 
 from app.formats import FORMATS, allowed_target, conversion_warning, target_options
-from app.media import detect_format, safe_original_name
+from app.media import detect_format, ffmpeg_command, pcm_codec, safe_original_name
 from app.security import constant_time_equal, digest, otp
 
 
@@ -42,7 +43,59 @@ class SignatureTests(unittest.TestCase):
 
     def test_rejects_unknown_and_sanitizes_download_name(self):
         self.assertIsNone(detect_format(b"not a media file"))
+        self.assertIsNone(detect_format(b"%PDF-1.7"))
+        self.assertIsNone(detect_format(b""))
         self.assertEqual(safe_original_name("../raport:2026?.mp4"), "raport_2026_.mp4")
+        self.assertEqual(safe_original_name(None), "plik")
+
+    def test_jpeg_is_not_mistaken_for_raw_mp3_frame(self):
+        # JPEG zaczyna się od FF D8, a ramka MP3 od FF Ex/FF Fx.
+        self.assertEqual(detect_format(b"\xff\xd8\xff\xdb"), "jpg")
+        self.assertEqual(detect_format(b"\xff\xfb\x90\x64"), "mp3")
+
+
+class FfmpegProfileTests(unittest.TestCase):
+    source = Path("in.bin")
+    destination = Path("out.bin")
+
+    def command(self, source_format: str, target: str, bit_depth=None) -> list[str]:
+        return ffmpeg_command(self.source, self.destination, source_format, target, bit_depth)
+
+    def test_only_local_protocols_and_no_stdin(self):
+        command = self.command("mp4", "gif")
+        self.assertIn("-nostdin", command)
+        self.assertEqual(command[command.index("-protocol_whitelist") + 1], "file,pipe")
+        self.assertEqual(command[-1], str(self.destination))
+
+    def test_audio_profiles(self):
+        self.assertIn("flac", self.command("wav", "flac"))
+        mp3 = self.command("flac", "mp3")
+        self.assertEqual(mp3[mp3.index("-b:a") + 1], "320k")
+        self.assertIn("libmp3lame", mp3)
+
+    def test_wav_keeps_source_bit_depth(self):
+        self.assertEqual(pcm_codec(None), "pcm_s16le")
+        self.assertEqual(pcm_codec(16), "pcm_s16le")
+        self.assertEqual(pcm_codec(24), "pcm_s24le")
+        self.assertEqual(pcm_codec(32), "pcm_s32le")
+        self.assertIn("pcm_s24le", self.command("flac", "wav", 24))
+
+    def test_video_profiles(self):
+        gif = self.command("mp4", "gif")
+        self.assertIn("-an", gif)
+        self.assertIn("palettegen=stats_mode=full", " ".join(gif))
+
+        mp4 = self.command("gif", "mp4")
+        self.assertIn("libx264", mp4)
+        self.assertEqual(mp4[mp4.index("-crf") + 1], "18")
+        self.assertEqual(mp4[mp4.index("-b:a") + 1], "256k")
+        self.assertEqual(mp4[mp4.index("-pix_fmt") + 1], "yuv420p")
+        self.assertIn("scale=trunc(iw/2)*2:trunc(ih/2)*2", mp4)
+
+        remux = self.command("mp4", "mov")
+        self.assertEqual(remux[remux.index("-c") + 1], "copy")
+        self.assertNotIn("libx264", remux)
+        self.assertIn("libx264", self.command("gif", "mov"))
 
 
 class SecurityTests(unittest.TestCase):

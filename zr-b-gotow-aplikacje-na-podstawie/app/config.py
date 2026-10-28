@@ -27,6 +27,8 @@ class Settings:
     active_window_minutes: int = int(os.getenv("ACTIVE_WINDOW_MINUTES", 15))
     otp_minutes: int = int(os.getenv("OTP_MINUTES", 10))
     otp_max_attempts: int = int(os.getenv("OTP_MAX_ATTEMPTS", 5))
+    otp_request_window_minutes: int = int(os.getenv("OTP_REQUEST_WINDOW_MINUTES", 15))
+    otp_requests_per_window: int = int(os.getenv("OTP_REQUESTS_PER_WINDOW", 5))
     session_days: int = int(os.getenv("SESSION_DAYS", 30))
     retention_minutes: int = int(os.getenv("RETENTION_MINUTES", 60))
     conversion_timeout_seconds: int = int(os.getenv("CONVERSION_TIMEOUT_SECONDS", 600))

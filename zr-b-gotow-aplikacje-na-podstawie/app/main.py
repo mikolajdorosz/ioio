@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -77,6 +78,17 @@ def get_user(session_token: str | None = Cookie(default=None, alias=COOKIE_NAME)
 @app.exception_handler(HTTPException)
 async def http_exception(_: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception(_: Request, exc: RequestValidationError) -> JSONResponse:
+    # The interface is Polish only, so FastAPI's English validation payload is replaced
+    # with a single readable message.
+    fields = sorted({str(error["loc"][-1]) for error in exc.errors() if error.get("loc")})
+    detail = "Żądanie jest niekompletne lub nieprawidłowe."
+    if fields:
+        detail = f"Żądanie jest niekompletne lub nieprawidłowe (pola: {', '.join(fields)})."
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 @app.get("/health")

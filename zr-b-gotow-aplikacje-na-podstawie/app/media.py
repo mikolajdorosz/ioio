@@ -69,7 +69,7 @@ async def save_and_detect(upload, temporary_path: Path, max_bytes: int) -> tuple
             while chunk := await upload.read(1024 * 1024):
                 total += len(chunk)
                 if total > max_bytes:
-                    raise MediaValidationError("Plik przekracza limit 250 MB.")
+                    raise MediaValidationError(f"Plik przekracza limit {max(1, max_bytes // (1024 * 1024))} MB.")
                 if len(header) < 128:
                     header += chunk[: 128 - len(header)]
                 handle.write(chunk)
@@ -155,7 +155,49 @@ def _run(command: list[str]) -> None:
         raise ConversionError(f"FFmpeg zakończył pracę błędem: {message[:400]}")
 
 
-def _ffmpeg_convert(source: Path, destination: Path, source_format: str, target: str) -> None:
+def probe_bit_depth(source: Path) -> int | None:
+    """Odczytuje głębię bitową pierwszego strumienia audio; None, gdy nie da się ustalić."""
+    command = [
+        settings.ffprobe_bin, "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=bits_per_raw_sample,bits_per_sample",
+        "-of", "default=noprint_wrappers=1", str(source),
+    ]
+    try:
+        completed = subprocess.run(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    values: dict[str, str] = {}
+    for line in completed.stdout.decode("utf-8", errors="replace").splitlines():
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    for key in ("bits_per_raw_sample", "bits_per_sample"):
+        raw = values.get(key, "")
+        if raw.isdigit() and int(raw) > 0:
+            return int(raw)
+    return None
+
+
+def pcm_codec(bit_depth: int | None) -> str:
+    """WAV ma zachować parametry źródła: 24-bitowe i 32-bitowe źródła nie są spłaszczane do 16 bitów."""
+    if bit_depth is None or bit_depth <= 16:
+        return "pcm_s16le"
+    if bit_depth <= 24:
+        return "pcm_s24le"
+    return "pcm_s32le"
+
+
+# Even dimensions and yuv420p are required by libx264 and by typical players; GIF sources
+# often have odd sizes and a palette pixel format, so both are normalised here.
+_H264_PROFILE = [
+    "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p",
+    "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+    "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
+]
+
+
+def ffmpeg_command(source: Path, destination: Path, source_format: str, target: str, bit_depth: int | None = None) -> list[str]:
     # Only local file and pipe protocols are enabled, so an uploaded file cannot make
     # FFmpeg fetch a network resource during conversion.
     command = [
@@ -166,19 +208,24 @@ def _ffmpeg_convert(source: Path, destination: Path, source_format: str, target:
     elif target == "mp3":
         command += ["-c:a", "libmp3lame", "-b:a", "320k"]
     elif target == "wav":
-        command += ["-c:a", "pcm_s16le"]
+        command += ["-c:a", pcm_codec(bit_depth)]
     elif target == "gif":
         command += ["-filter_complex", "[0:v]fps=12,split[a][b];[a]palettegen=stats_mode=full[p];[b][p]paletteuse", "-an"]
     elif target == "mp4":
-        command += ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac", "-b:a", "256k"]
+        command += _H264_PROFILE
     elif target == "mov":
         if source_format == "mp4":
-            command += ["-c", "copy"]
+            command += ["-c", "copy", "-movflags", "+faststart"]
         else:
-            command += ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac", "-b:a", "256k"]
+            command += _H264_PROFILE
     else:
         raise ConversionError("Nieobsługiwany format docelowy audio lub wideo.")
-    _run(command + [str(destination)])
+    return command + [str(destination)]
+
+
+def _ffmpeg_convert(source: Path, destination: Path, source_format: str, target: str) -> None:
+    bit_depth = probe_bit_depth(source) if target == "wav" else None
+    _run(ffmpeg_command(source, destination, source_format, target, bit_depth))
 
 
 def convert(source: Path, destination: Path, source_format: str, target_format: str) -> None:
