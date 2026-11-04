@@ -53,6 +53,14 @@ async def cleanup_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging()
+    if not settings.smtp_host:
+        if settings.is_development:
+            logging.getLogger("converter").warning(
+                "SMTP nie jest skonfigurowany: kod logowania jest pokazywany w przeglądarce. "
+                "Każdy, kto ma dostęp do serwera, może zalogować się na dowolny adres. Używaj tylko do testów."
+            )
+        else:
+            logging.getLogger("converter").error("APP_ENV=production bez SMTP_HOST: logowanie nie będzie działać.")
     initialize()
     cleanup_expired()
     await restore_queued_jobs()
@@ -93,7 +101,11 @@ async def validation_exception(_: Request, exc: RequestValidationError) -> JSONR
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "environment": settings.environment}
+    return {
+        "status": "ok",
+        "environment": settings.environment,
+        "email": "smtp" if settings.smtp_host else ("kod w interfejsie" if settings.is_development else "brak"),
+    }
 
 
 @app.post("/api/auth/request-code")

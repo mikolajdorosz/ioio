@@ -31,9 +31,11 @@ class Settings:
     otp_requests_per_window: int = int(os.getenv("OTP_REQUESTS_PER_WINDOW", 5))
     session_days: int = int(os.getenv("SESSION_DAYS", 30))
     retention_minutes: int = int(os.getenv("RETENTION_MINUTES", 60))
-    conversion_timeout_seconds: int = int(os.getenv("CONVERSION_TIMEOUT_SECONDS", 600))
-    conversion_cpu_seconds: int = int(os.getenv("CONVERSION_CPU_SECONDS", 540))
-    converter_memory_mb: int = int(os.getenv("CONVERTER_MEMORY_MB", 512))
+    conversion_timeout_seconds: int = int(os.getenv("CONVERSION_TIMEOUT_SECONDS", 1800))
+    # Counted across all FFmpeg threads, so it must exceed the wall-clock timeout.
+    conversion_cpu_seconds: int = int(os.getenv("CONVERSION_CPU_SECONDS", 3600))
+    converter_memory_mb: int = int(os.getenv("CONVERTER_MEMORY_MB", 0))
+    converter_threads: int = int(os.getenv("CONVERTER_THREADS", 2))
     max_conversions: int = int(os.getenv("MAX_CONVERSIONS", 2))
     secret_key: str = os.getenv("SECRET_KEY", "change-this-development-secret-before-production")
     cookie_secure: bool = _bool("COOKIE_SECURE", False)
@@ -43,6 +45,7 @@ class Settings:
     smtp_password: str = os.getenv("SMTP_PASSWORD", "")
     smtp_from: str = os.getenv("SMTP_FROM", "")
     smtp_starttls: bool = _bool("SMTP_STARTTLS", True)
+    smtp_ssl: bool = _bool("SMTP_SSL", False)
     ffmpeg_bin: str = os.getenv("FFMPEG_BIN", "ffmpeg")
     ffprobe_bin: str = os.getenv("FFPROBE_BIN", "ffprobe")
     admin_emails: tuple[str, ...] = tuple(

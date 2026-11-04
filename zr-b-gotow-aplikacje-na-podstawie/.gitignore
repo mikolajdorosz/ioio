@@ -10,3 +10,4 @@ storage/*
 logs/*
 !logs/.gitkeep
 work/
+probki/

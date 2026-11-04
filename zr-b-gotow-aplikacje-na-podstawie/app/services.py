@@ -38,29 +38,43 @@ def _email_ok(email: str) -> bool:
     return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email)) and len(email) <= 254
 
 
-def _send_email(address: str, code: str) -> None:
-    if not settings.smtp_host:
-        logger.warning("SMTP nie jest skonfigurowany; kod wysłany tylko do dziennika dla %s", address)
-        return
+def send_email(address: str, subject: str, body: str) -> None:
     message = EmailMessage()
-    message["Subject"] = "Kod logowania do Konwertera plików"
-    message["From"] = settings.smtp_from or settings.smtp_user
+    message["Subject"] = subject
+    message["From"] = settings.smtp_from or settings.smtp_user or "konwerter@localhost"
     message["To"] = address
-    message.set_content(
-        f"Twój jednorazowy kod logowania: {code}\n\nKod jest ważny przez {settings.otp_minutes} minut i można go użyć tylko raz."
-    )
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.smtp_starttls:
+    message.set_content(body)
+    if settings.smtp_ssl:
+        client = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15)
+    else:
+        client = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
+    with client as smtp:
+        if settings.smtp_starttls and not settings.smtp_ssl:
             smtp.starttls()
         if settings.smtp_user:
             smtp.login(settings.smtp_user, settings.smtp_password)
         smtp.send_message(message)
 
 
+def _send_code(address: str, code: str) -> None:
+    if not settings.smtp_host:
+        logger.warning("SMTP nie jest skonfigurowany; kod dla %s pokazano w interfejsie (tryb development)", address)
+        return
+    send_email(
+        address,
+        "Kod logowania do Konwertera plików",
+        f"Twój jednorazowy kod logowania: {code}\n\nKod jest ważny przez {settings.otp_minutes} minut i można go użyć tylko raz.\n"
+        "Jeśli to nie Ty prosiłeś o kod, zignoruj tę wiadomość.",
+    )
+
+
 async def request_login_code(email: str) -> dict:
     email = email.strip().lower()
     if not _email_ok(email):
         raise HTTPException(status_code=422, detail="Podaj prawidłowy adres e-mail.")
+    if not settings.smtp_host and not settings.is_development:
+        logger.error("Prośba o kod dla %s odrzucona: brak konfiguracji SMTP w trybie produkcyjnym", email)
+        raise HTTPException(status_code=503, detail="Wysyłka e-maili nie jest skonfigurowana. Skontaktuj się z administratorem.")
     value = otp()
     timestamp = now()
     with transaction() as conn:
@@ -77,7 +91,7 @@ async def request_login_code(email: str) -> dict:
             (str(uuid.uuid4()), email, digest(value), iso_after_minutes(settings.otp_minutes), timestamp),
         )
     try:
-        await asyncio.to_thread(_send_email, email, value)
+        await asyncio.to_thread(_send_code, email, value)
     except Exception:
         logger.exception("Nie udało się wysłać wiadomości z kodem do %s", email)
         raise HTTPException(status_code=503, detail="Nie udało się wysłać kodu. Spróbuj ponownie później.")

@@ -67,6 +67,12 @@ class FfmpegProfileTests(unittest.TestCase):
         self.assertEqual(command[command.index("-protocol_whitelist") + 1], "file,pipe")
         self.assertEqual(command[-1], str(self.destination))
 
+    def test_thread_count_is_pinned(self):
+        # Bez tego FFmpeg tworzy wątki według rdzeni hosta, a nie limitu CPU kontenera.
+        command = self.command("gif", "mp4")
+        self.assertIn("-filter_threads", command)
+        self.assertGreater(command.index("-threads"), command.index("-i"), "-threads ma dotyczyć enkodera")
+
     def test_audio_profiles(self):
         self.assertIn("flac", self.command("wav", "flac"))
         mp3 = self.command("flac", "mp3")

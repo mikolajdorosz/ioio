@@ -9,8 +9,10 @@ import os
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="konwerter-testy-"))
 os.environ.update(
@@ -224,6 +226,34 @@ class AuthTests(ApiTestCase):
         response = self.request_code(email)
         self.assertEqual(response.status_code, 429)
         self.assertIn("Zbyt wiele", response.json()["detail"])
+
+    def test_production_without_smtp_refuses_instead_of_pretending(self):
+        with mock.patch("app.services.settings", replace(settings, environment="production", smtp_host="")):
+            response = self.request_code("prod@example.pl")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("nie jest skonfigurowana", response.json()["detail"])
+        with connection() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM one_time_codes").fetchone()[0], 0)
+
+    def test_code_is_emailed_and_not_shown_when_smtp_configured(self):
+        smtp_settings = replace(settings, smtp_host="smtp.example.pl", smtp_user="nadawca@example.pl", smtp_password="haslo")
+        with mock.patch("app.services.settings", smtp_settings), mock.patch("app.services.smtplib.SMTP") as smtp_class:
+            response = self.request_code("odbiorca@example.pl")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn("development_code", response.json())
+        smtp = smtp_class.return_value.__enter__.return_value
+        smtp.starttls.assert_called_once()
+        smtp.login.assert_called_once_with("nadawca@example.pl", "haslo")
+        message = smtp.send_message.call_args.args[0]
+        self.assertEqual(message["To"], "odbiorca@example.pl")
+        self.assertRegex(message.get_content(), r"kod logowania: \d{6}")
+
+    def test_smtp_failure_reports_polish_error(self):
+        smtp_settings = replace(settings, smtp_host="smtp.example.pl")
+        with mock.patch("app.services.settings", smtp_settings), mock.patch("app.services.smtplib.SMTP", side_effect=OSError("brak sieci")):
+            response = self.request_code("odbiorca@example.pl")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Nie udało się wysłać kodu", response.json()["detail"])
 
     def test_admin_flag_and_logs_endpoint(self):
         user = self.login("zwykly@example.pl")

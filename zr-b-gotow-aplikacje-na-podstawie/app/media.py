@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import subprocess
@@ -18,6 +19,9 @@ try:
     HEIC_READY = True
 except ImportError:  # surfaced as a clear conversion error if HEIC is requested
     HEIC_READY = False
+
+
+logger = logging.getLogger("converter")
 
 
 class MediaValidationError(ValueError):
@@ -124,15 +128,18 @@ def _image_convert(source: Path, destination: Path, target: str) -> None:
 def _run(command: list[str]) -> None:
     process_options: dict = {}
     if os.name == "posix":
-        # A worker receives its own CPU, virtual-memory and output-file limits in addition
-        # to the cgroup limits defined for the Docker service.
+        # A worker receives its own CPU and output-file limits in addition to the cgroup
+        # memory and CPU limits defined for the Docker service. RLIMIT_AS caps virtual
+        # address space, which libx264 and glibc reserve generously per thread, so it is
+        # opt-in only: a low value makes every video encode fail at start-up.
         def restrict_resources() -> None:
             import resource
 
-            memory = settings.converter_memory_mb * 1024 * 1024
             resource.setrlimit(resource.RLIMIT_CPU, (settings.conversion_cpu_seconds, settings.conversion_cpu_seconds))
-            resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
             resource.setrlimit(resource.RLIMIT_FSIZE, (settings.max_file_bytes * 2, settings.max_file_bytes * 2))
+            if settings.converter_memory_mb > 0:
+                memory = settings.converter_memory_mb * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
 
         process_options["preexec_fn"] = restrict_resources
     try:
@@ -150,9 +157,14 @@ def _run(command: list[str]) -> None:
     except subprocess.TimeoutExpired as exc:
         raise ConversionError("Przekroczono limit czasu konwersji.") from exc
     if completed.returncode != 0:
-        details = completed.stderr.decode("utf-8", errors="replace").strip().splitlines()
-        message = details[-1] if details else "nieznany błąd FFmpeg"
-        raise ConversionError(f"FFmpeg zakończył pracę błędem: {message[:400]}")
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        logger.error("FFmpeg zakończył pracę kodem %s:\n%s", completed.returncode, stderr[-4000:])
+        details = stderr.splitlines()
+        # The last line is usually a generic summary; the first one names the real cause.
+        message = details[0] if details else "nieznany błąd FFmpeg"
+        if completed.returncode < 0:
+            message = "proces został przerwany przez system (prawdopodobnie zabrakło pamięci lub czasu procesora)"
+        raise ConversionError(f"Konwersja nie powiodła się: {message[:400]}")
 
 
 def probe_bit_depth(source: Path) -> int | None:
@@ -200,8 +212,12 @@ _H264_PROFILE = [
 def ffmpeg_command(source: Path, destination: Path, source_format: str, target: str, bit_depth: int | None = None) -> list[str]:
     # Only local file and pipe protocols are enabled, so an uploaded file cannot make
     # FFmpeg fetch a network resource during conversion.
+    # FFmpeg sizes its thread pools from the host's core count, not the container's CPU
+    # quota, so the worker count is pinned to the configured value.
+    threads = str(max(1, settings.converter_threads))
     command = [
-        settings.ffmpeg_bin, "-hide_banner", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file,pipe", "-y", "-i", str(source)
+        settings.ffmpeg_bin, "-hide_banner", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file,pipe",
+        "-filter_threads", threads, "-y", "-i", str(source), "-threads", threads,
     ]
     if target == "flac":
         command += ["-c:a", "flac"]
