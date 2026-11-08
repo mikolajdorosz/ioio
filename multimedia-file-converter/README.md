@@ -26,6 +26,8 @@ Pełna instrukcja obsługi i wdrożenia (konfiguracja poczty, dostęp z internet
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\uruchom-serwer.ps1 -Mailpit
+
+   New-NetFirewallRule -DisplayName "Konwerter plikow (TCP 8000)" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private,Domain
    ```
 
    Skrypt przy pierwszym uruchomieniu tworzy plik `.env` z losowym sekretem, buduje i uruchamia kontener, a na końcu wypisuje adresy aplikacji:
