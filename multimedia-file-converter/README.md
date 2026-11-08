@@ -38,7 +38,7 @@ Pełna instrukcja obsługi i wdrożenia (konfiguracja poczty, dostęp z internet
       Poczta:               smtp
       Skrzynka testowa:     http://localhost:8025
    ```
-3. Dostęp przez internet: **[Cloudflare Tunnel](INSTRUKCJA.md#4.3.-dostęp-z-internetu)**
+3. Dostęp przez internet: **[Cloudflare Tunnel](INSTRUKCJA.md#43-dostęp-z-internetu)**
 
    ```text
     +--------------------------------------------------------------------------------------------+
