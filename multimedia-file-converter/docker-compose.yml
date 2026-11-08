@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    ports:
+      # 0.0.0.0 udostępnia aplikację innym komputerom w sieci; 127.0.0.1 tylko temu komputerowi.
+      - "${BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8000}:8000"
+    volumes:
+      - converter_data:/var/lib/konwerter
+      - converter_logs:/var/log/konwerter
+    restart: unless-stopped
+    mem_limit: ${APP_MEMORY_LIMIT:-1536m}
+    cpus: ${APP_CPUS:-2.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Testowa skrzynka pocztowa: przechwytuje wszystkie e-maile i pokazuje je pod http://localhost:8025.
+  # Uruchamiana tylko z: docker compose --profile mailpit up
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["mailpit"]
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: ["production"]
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  converter_data:
+  converter_logs:
+  caddy_data:
+  caddy_config:
