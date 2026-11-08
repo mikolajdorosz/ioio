@@ -181,9 +181,10 @@ Sieci uczelniane, firmowe, hotelowe i publiczne Wi-Fi często mają włączoną 
 
 **B. Cloudflare Tunnel (publiczny adres HTTPS w minutę)**
 
-1. Zainstaluj na serwerze: `winget install Cloudflare.cloudflared`.
-2. Uruchom (z innego terminala jeśli `cloudflare --version` nic nie zwraca): `cloudflared tunnel --url http://localhost:8000`.
-3. W wyjściu pojawi się adres typu `https://losowe-slowa.trycloudflare.com`. Wyślij go klientom.
+1. Zainstaluj na serwerze: `winget install --id Cloudflare.cloudflared --exact`.
+2. Sprawdź ścieżkę do programu: `where.exe cloudflared`.
+3. Uruchom: `{ścieżka}/cloudflared tunnel --url http://localhost:8000`.
+4. W wyjściu pojawi się adres typu `https://losowe-slowa.trycloudflare.com`. Wyślij go klientom.
 
 Ograniczenia: adres zmienia się przy każdym uruchomieniu, a darmowy Cloudflare przyjmuje żądania do **100 MB**, więc większych plików nie da się tą drogą wysłać. Do pełnego limitu 250 MB użyj wariantu A albo C.
 
